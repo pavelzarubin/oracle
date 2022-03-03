@@ -58,8 +58,11 @@ updateOracleTest (ac, pkh) = runReq defaultHttpConfig $ do
     updateOracleInstance :: ContractActivationArgs (ActivateContractParams (Oracle, Integer))
     updateOracleInstance = ContractActivationArgs {caID = ActivateContractParams (oracle, 456) "UpdateO", caWallet = Just (knownWallet 3)}
 
-testParams :: (AssetClass, PubKeyHash)
-testParams = (AssetClass ("33f24d17d7dd7a8909c0e7988a20d45284432f76202be0ba530fabe6", "BCD"), "2e0ad60c3207248cecd47dbde3d752e0aad141d6b8f81ac2c6eca27c")
+updateOracleTest' :: CurrencySymbol -> IO ()
+updateOracleTest' = updateOracleTest . testParams
+
+testParams :: CurrencySymbol -> (AssetClass, PubKeyHash)
+testParams cur = (AssetClass (cur, "BCD"), "2e0ad60c3207248cecd47dbde3d752e0aad141d6b8f81ac2c6eca27c")
 
 getOracleTest :: (AssetClass, PubKeyHash) -> IO ()
 getOracleTest (ac, pkh) = runReq defaultHttpConfig $ do
@@ -80,3 +83,6 @@ getOracleTest (ac, pkh) = runReq defaultHttpConfig $ do
     oracle = Oracle ac pkh
     getOracleInstance :: ContractActivationArgs (ActivateContractParams Oracle)
     getOracleInstance = ContractActivationArgs {caID = ActivateContractParams oracle "GetO", caWallet = Just (knownWallet 4)}
+
+getOracleTest' :: CurrencySymbol -> IO ()
+getOracleTest' = getOracleTest . testParams
