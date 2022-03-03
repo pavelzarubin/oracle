@@ -136,8 +136,8 @@ findOracle oracle = do
     [(oref, ch)] -> return (Just (oref, ch))
     _ -> return Nothing
 
-updateOracle :: Oracle -> Integer -> Contract () UpdateSchema Text ()
-updateOracle oracle newdat = do
+updateOracle :: (Oracle, Integer) -> Contract () UpdateSchema Text ()
+updateOracle (oracle, newdat) = do
   m <- findOracle oracle
   let c = Constraints.mustPayToTheScript newdat $ (assetClassValue (oAssetClass oracle) 1) <> minLovelace
   case m of
@@ -160,7 +160,7 @@ updateOracle oracle newdat = do
 
 type StartSchema = Endpoint "start" OracleParams
 
-type UpdateSchema = Endpoint "update" Integer
+type UpdateSchema = Endpoint "update" (Oracle, Integer)
 
 type GetSchema = Endpoint "get" ()
 
@@ -172,7 +172,7 @@ startEndpoints = awaitPromise start' >> startEndpoints
 updateEndpoints :: Oracle -> Contract () UpdateSchema Text ()
 updateEndpoints oracle = awaitPromise update' >> updateEndpoints oracle
   where
-    update' = endpoint @"update" (updateOracle oracle)
+    update' = endpoint @"update" updateOracle
 
 getEndpoint :: Oracle -> Contract () GetSchema Text ()
 getEndpoint oracle = awaitPromise get' >> getEndpoint oracle

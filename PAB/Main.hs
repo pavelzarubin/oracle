@@ -30,7 +30,7 @@ import qualified Plutus.PAB.Webserver.Server as PAB.Server
 import Prettyprinter (Pretty (..), viaShow)
 import Wallet.Emulator.Wallet (knownWallet)
 
-data OracleContracts = StartO OracleParams | UpdateO Oracle Integer | GetO Oracle
+data OracleContracts = StartO OracleParams | UpdateO (Oracle, Integer) | GetO Oracle
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, OpenApi.ToSchema)
 
@@ -42,11 +42,11 @@ instance Builtin.HasDefinitions OracleContracts where
   getSchema = \case
     StartO _ -> Builtin.endpointsToSchemas @StartSchema
     GetO _ -> Builtin.endpointsToSchemas @GetSchema
-    UpdateO _ _ -> Builtin.endpointsToSchemas @UpdateSchema
+    UpdateO _ -> Builtin.endpointsToSchemas @UpdateSchema
   getContract = \case
     StartO op -> SomeBuiltin $ runOracle op
     GetO oracle -> SomeBuiltin $ getOracleValue oracle
-    UpdateO oracle newdat -> SomeBuiltin $ updateOracle oracle newdat
+    UpdateO a -> SomeBuiltin $ updateOracle a
 
 handlers :: SimulatorEffectHandlers (Builtin OracleContracts)
 handlers =
@@ -73,8 +73,7 @@ main = void $
     oracle <- waitForLast cidInit
     Simulator.waitNSlots 2
 
-    void $ Simulator.activateContract wallet1 $ UpdateO oracle 123
-
+    void $ Simulator.activateContract wallet1 $ UpdateO (oracle, 123)
     void $ Simulator.waitNSlots 2
 
     void $ Simulator.activateContract wallet2 $ GetO oracle
