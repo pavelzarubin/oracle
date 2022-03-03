@@ -12,8 +12,6 @@ import Ledger.Value
 import Oracle
 import Plutus.Contract.Test
 import Plutus.Trace
-import Plutus.Trace.Emulator
-import Wallet.Emulator.Wallet
 
 simpleTrace :: EmulatorTrace ()
 simpleTrace = do
@@ -24,14 +22,13 @@ simpleTrace = do
   oracle <- getOracle h1
   void $ waitNSlots 2
   h2 <- activateContractWallet (knownWallet 1) (updateEndpoints oracle)
-  callEndpoint @"update" h2 $
-    OracleDatum 456
+  callEndpoint @"update" h2 456
   void $ waitNSlots 2
   h3 <- activateContractWallet (knownWallet 2) (getEndpoint oracle)
   callEndpoint @"get" h3 ()
   void $ waitNSlots 2
   h4 <- activateContractWallet (knownWallet 2) (updateEndpoints oracle)
-  callEndpoint @"update" h4 $ OracleDatum 789
+  callEndpoint @"update" h4 789
   void $ waitNSlots 2
   callEndpoint @"get" h3 ()
   void $ waitNSlots 2
@@ -41,7 +38,7 @@ simpleTrace = do
     getOracle h = do
       l <- observableState h
       case l of
-        Last Nothing -> getOracle h
+        Last Nothing -> throwError $ GenericError "ORACLE NOT CREATED"
         Last (Just oracle) -> Extras.logInfo @String (show oracle) >> return oracle
 
 runTrace :: IO ()

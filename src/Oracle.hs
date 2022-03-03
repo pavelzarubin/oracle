@@ -17,8 +17,6 @@ module Oracle where
 
 import Control.Monad hiding (fmap)
 import Data.Aeson (FromJSON, ToJSON)
-import qualified Data.ByteString.Lazy as LBS
-import qualified Data.ByteString.Short as SBS
 import qualified Data.Map as Map
 import Data.Monoid (Last (..))
 import qualified Data.OpenApi as OpenApi
@@ -34,7 +32,7 @@ import Plutus.Contracts.Currency
 import Plutus.V1.Ledger.Value (AssetClass (..), assetClassValue, assetClassValueOf)
 import qualified PlutusTx
 import PlutusTx.Prelude hiding (Semigroup (..), unless)
-import Prelude (Eq, Semigroup (..), Show (..), String, last)
+import Prelude (Eq, Semigroup (..), Show (..), String)
 
 minLovelace :: Value
 minLovelace = lovelaceValueOf 2_000_000
@@ -43,7 +41,7 @@ data Oracle = Oracle
   { oAssetClass :: AssetClass,
     oOwner :: PubKeyHash
   }
-  deriving (Show, Generic, FromJSON, ToJSON)
+  deriving (Show, Generic, FromJSON, ToJSON, Prelude.Eq, OpenApi.ToSchema, ToSchema)
 
 PlutusTx.makeLift ''Oracle
 
@@ -51,12 +49,7 @@ data OracleRedeemer = Use | Update deriving (Show)
 
 PlutusTx.unstableMakeIsData ''OracleRedeemer
 
-newtype OracleDatum = OracleDatum Integer
-  deriving (Show, Generic, FromJSON, ToJSON, Prelude.Eq, PlutusTx.Prelude.Eq)
-
-PlutusTx.unstableMakeIsData ''OracleDatum
-
-mkOracleValidator :: Oracle -> OracleDatum -> OracleRedeemer -> ScriptContext -> Bool
+mkOracleValidator :: Oracle -> Integer -> OracleRedeemer -> ScriptContext -> Bool
 mkOracleValidator oracle dat red ctx =
   traceIfFalse "no token in input" inputHasToken
     && traceIfFalse "no token in output" outputHasToken
@@ -85,7 +78,7 @@ mkOracleValidator oracle dat red ctx =
     outputHasToken :: Bool
     outputHasToken = assetClassValueOf (txOutValue ownOutput) (oAssetClass oracle) == 1
 
-    outputDatum :: Maybe OracleDatum
+    outputDatum :: Maybe Integer
     outputDatum = case txOutDatumHash ownOutput of
       Nothing -> traceError "wrong output datum"
       Just h -> case findDatum h info of
@@ -98,7 +91,7 @@ mkOracleValidator oracle dat red ctx =
 data Oracling
 
 instance Scripts.ValidatorTypes Oracling where
-  type DatumType Oracling = OracleDatum
+  type DatumType Oracling = Integer
   type RedeemerType Oracling = OracleRedeemer
 
 typedValidator :: Oracle -> Scripts.TypedValidator Oracling
@@ -109,7 +102,7 @@ typedValidator oracle =
     )
     $$(PlutusTx.compile [||wrap||])
   where
-    wrap = Scripts.wrapValidator @OracleDatum @OracleRedeemer
+    wrap = Scripts.wrapValidator @Integer @OracleRedeemer
 
 oracleValidator :: Oracle -> Validator
 oracleValidator = Scripts.validatorScript . typedValidator
@@ -122,7 +115,7 @@ oracleAddress = scriptAddress . oracleValidator
 newtype OracleParams = OracleParams
   { opTokenName :: TokenName
   }
-  deriving (Show, Generic, FromJSON, ToJSON)
+  deriving (Show, Generic, FromJSON, ToJSON, Prelude.Eq, OpenApi.ToSchema, ToSchema)
 
 startOracle :: OracleParams -> Contract w s Text Oracle
 startOracle OracleParams {..} = do
@@ -143,7 +136,7 @@ findOracle oracle = do
     [(oref, ch)] -> return (Just (oref, ch))
     _ -> return Nothing
 
-updateOracle :: Oracle -> OracleDatum -> Contract w s Text ()
+updateOracle :: Oracle -> Integer -> Contract () UpdateSchema Text ()
 updateOracle oracle newdat = do
   m <- findOracle oracle
   let c = Constraints.mustPayToTheScript newdat $ (assetClassValue (oAssetClass oracle) 1) <> minLovelace
@@ -167,7 +160,7 @@ updateOracle oracle newdat = do
 
 type StartSchema = Endpoint "start" OracleParams
 
-type UpdateSchema = Endpoint "update" OracleDatum
+type UpdateSchema = Endpoint "update" Integer
 
 type GetSchema = Endpoint "get" ()
 
@@ -186,7 +179,7 @@ getEndpoint oracle = awaitPromise get' >> getEndpoint oracle
   where
     get' = endpoint @"get" $ const (getOracleValue oracle)
 
-getOracleValue :: Oracle -> Contract w s Text ()
+getOracleValue :: Oracle -> Contract () GetSchema Text ()
 getOracleValue oracle = do
   m <- findOracle oracle
   case m of
@@ -194,7 +187,7 @@ getOracleValue oracle = do
       case _ciTxOutDatum ch of
         Left _ -> logError @String "BAD VALUE"
         Right (Datum d) -> case PlutusTx.fromBuiltinData d of
-          Just (OracleDatum v) -> logInfo @String $ "ORACLE FOUNDED. VALUE =  " ++ show v
+          Just (v :: Integer) -> logInfo @String $ "ORACLE FOUNDED. VALUE =  " ++ show v
           Nothing -> logError @String "bad datum"
     _ -> logError @String "oracle not found"
 
