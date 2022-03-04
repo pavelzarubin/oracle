@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Clients where
@@ -35,8 +36,8 @@ startOracleTest = runReq defaultHttpConfig $ do
         then "oracle started " ++ (show response)
         else "oracle not started"
   where
-    startOracleInstance :: ContractActivationArgs (ActivateContractParams OracleParams)
-    startOracleInstance = ContractActivationArgs {caID = ActivateContractParams (OracleParams "BCD") "StartO", caWallet = Just (knownWallet 3)}
+    startOracleInstance :: ContractActivationArgs (ActivateContractParams (OracleParams, Integer))
+    startOracleInstance = ContractActivationArgs {caID = ActivateContractParams (OracleParams "BCD" 500_000, 789) "StartO", caWallet = Just (knownWallet 3)}
 
 updateOracleTest :: (AssetClass, PubKeyHash) -> IO ()
 updateOracleTest (ac, pkh) = runReq defaultHttpConfig $ do
@@ -54,15 +55,15 @@ updateOracleTest (ac, pkh) = runReq defaultHttpConfig $ do
         else "oracle not started"
   where
     oracle :: Oracle
-    oracle = Oracle ac pkh
+    oracle = Oracle ac pkh 500_000
     updateOracleInstance :: ContractActivationArgs (ActivateContractParams (Oracle, Integer))
     updateOracleInstance = ContractActivationArgs {caID = ActivateContractParams (oracle, 456) "UpdateO", caWallet = Just (knownWallet 3)}
 
-updateOracleTest' :: CurrencySymbol -> IO ()
-updateOracleTest' = updateOracleTest . testParams
+updateOracleTest' :: IO ()
+updateOracleTest' = updateOracleTest testParams
 
-testParams :: CurrencySymbol -> (AssetClass, PubKeyHash)
-testParams cur = (AssetClass (cur, "BCD"), "2e0ad60c3207248cecd47dbde3d752e0aad141d6b8f81ac2c6eca27c")
+testParams :: (AssetClass, PubKeyHash)
+testParams = (AssetClass ("33f24d17d7dd7a8909c0e7988a20d45284432f76202be0ba530fabe6", "BCD"), "2e0ad60c3207248cecd47dbde3d752e0aad141d6b8f81ac2c6eca27c")
 
 getOracleTest :: (AssetClass, PubKeyHash) -> IO ()
 getOracleTest (ac, pkh) = runReq defaultHttpConfig $ do
@@ -80,9 +81,9 @@ getOracleTest (ac, pkh) = runReq defaultHttpConfig $ do
         else "oracle not started"
   where
     oracle :: Oracle
-    oracle = Oracle ac pkh
+    oracle = Oracle ac pkh 500_000
     getOracleInstance :: ContractActivationArgs (ActivateContractParams Oracle)
     getOracleInstance = ContractActivationArgs {caID = ActivateContractParams oracle "GetO", caWallet = Just (knownWallet 4)}
 
-getOracleTest' :: CurrencySymbol -> IO ()
-getOracleTest' = getOracleTest . testParams
+getOracleTest' :: IO ()
+getOracleTest' = getOracleTest testParams

@@ -29,7 +29,7 @@ import qualified Ledger.Typed.Scripts as Scripts
 import Playground.Contract (ToSchema)
 import Plutus.Contract as Contract
 import Plutus.Contracts.Currency
-import Plutus.V1.Ledger.Value (AssetClass (..), assetClassValue, assetClassValueOf)
+import Plutus.V1.Ledger.Value (AssetClass (..), assetClassValue, assetClassValueOf, geq)
 import qualified PlutusTx
 import PlutusTx.Prelude hiding (Semigroup (..), unless)
 import Prelude (Eq, Semigroup (..), Show (..), String)
@@ -39,11 +39,21 @@ minLovelace = lovelaceValueOf 2_000_000
 
 data Oracle = Oracle
   { oAssetClass :: AssetClass,
-    oOwner :: PubKeyHash
+    oOwner :: PubKeyHash,
+    oFee :: Integer
   }
   deriving (Show, Generic, FromJSON, ToJSON, Prelude.Eq, OpenApi.ToSchema, ToSchema)
 
 PlutusTx.makeLift ''Oracle
+
+{-data OracleDatum = OracleDatum {odValue :: Integer, odFee :: Integer}
+  deriving (Show, Generic, FromJSON, ToJSON, Prelude.Eq, OpenApi.ToSchema, ToSchema)
+
+instance PlutusTx.Prelude.Eq OracleDatum where
+  {-# INLINEABLE (==) #-}
+  (OracleDatum v1 f1) == (OracleDatum v2 f2) = (v1 == v2) && (f1 == f2) -}
+
+--PlutusTx.unstableMakeIsData ''OracleDatum
 
 data OracleRedeemer = Use | Update deriving (Show)
 
@@ -54,7 +64,9 @@ mkOracleValidator oracle dat red ctx =
   traceIfFalse "no token in input" inputHasToken
     && traceIfFalse "no token in output" outputHasToken
     && case red of
-      Use -> traceIfFalse "invalid output datum" ((Just dat) == outputDatum)
+      Use ->
+        traceIfFalse "invalid output datum" ((Just dat) == outputDatum)
+          && traceIfFalse "fee not paid" feesPaid
       Update ->
         traceIfFalse "invalid output datum" correctOutputDatum
           && traceIfFalse "tx must be signed by owner" (txSignedBy info $ oOwner oracle)
@@ -88,6 +100,12 @@ mkOracleValidator oracle dat red ctx =
     correctOutputDatum :: Bool
     correctOutputDatum = isJust outputDatum
 
+    feesPaid :: Bool
+    feesPaid =
+      let inVal = txOutValue ownInput
+          outVal = txOutValue ownOutput
+       in outVal `geq` (inVal <> (lovelaceValueOf $ oFee oracle))
+
 data Oracling
 
 instance Scripts.ValidatorTypes Oracling where
@@ -112,22 +130,11 @@ oracleAddress = scriptAddress . oracleValidator
 
 -----------------------------------------------------------
 
-newtype OracleParams = OracleParams
-  { opTokenName :: TokenName
+data OracleParams = OracleParams
+  { opTokenName :: TokenName,
+    opFee :: Integer
   }
   deriving (Show, Generic, FromJSON, ToJSON, Prelude.Eq, OpenApi.ToSchema, ToSchema)
-
-startOracle :: OracleParams -> Contract w s Text Oracle
-startOracle OracleParams {..} = do
-  pkh <- Contract.ownPaymentPubKeyHash
-  osc <- mapError (pack . show) (mintContract pkh [(opTokenName, 1)] :: Contract w s CurrencyError OneShotCurrency)
-  let oracle =
-        Oracle
-          { oOwner = unPaymentPubKeyHash pkh,
-            oAssetClass = AssetClass (currencySymbol osc, opTokenName)
-          }
-  logInfo @String $ "ORACLE STARTED " ++ show oracle
-  return oracle
 
 findOracle :: Oracle -> Contract w s Text (Maybe (TxOutRef, ChainIndexTxOut))
 findOracle oracle = do
@@ -139,7 +146,7 @@ findOracle oracle = do
 updateOracle :: (Oracle, Integer) -> Contract () UpdateSchema Text ()
 updateOracle (oracle, newdat) = do
   m <- findOracle oracle
-  let c = Constraints.mustPayToTheScript newdat $ (assetClassValue (oAssetClass oracle) 1) <> minLovelace
+  let c = Constraints.mustPayToTheScript newdat (assetClassValue (oAssetClass oracle) 1 <> minLovelace)
   case m of
     Nothing -> do
       logInfo @String "oracle not found"
@@ -147,6 +154,7 @@ updateOracle (oracle, newdat) = do
       awaitTxConfirmed $ getCardanoTxId ledgerTx
       logInfo @String $ "ORACLE UPDATED " ++ show newdat
     (Just (oref, ch)) -> do
+      logInfo @String "oracle founded"
       let lookups =
             Constraints.unspentOutputs (Map.singleton oref ch)
               <> Constraints.typedValidatorLookups (typedValidator oracle)
@@ -155,19 +163,12 @@ updateOracle (oracle, newdat) = do
             c
               <> Constraints.mustSpendScriptOutput oref (Redeemer $ PlutusTx.toBuiltinData Update)
       ledgerTx <- submitTxConstraintsWith @Oracling lookups tx
-      awaitTxConfirmed $ getCardanoTxId ledgerTx
+      void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
       logInfo @String $ "Oracle updated " ++ show newdat
-
-type StartSchema = Endpoint "start" OracleParams
 
 type UpdateSchema = Endpoint "update" (Oracle, Integer)
 
 type GetSchema = Endpoint "get" ()
-
-startEndpoints :: Contract () StartSchema Text Oracle
-startEndpoints = awaitPromise start' >> startEndpoints
-  where
-    start' = endpoint @"start" startOracle
 
 updateEndpoints :: Oracle -> Contract () UpdateSchema Text ()
 updateEndpoints oracle = awaitPromise update' >> updateEndpoints oracle
@@ -183,15 +184,47 @@ getOracleValue :: Oracle -> Contract () GetSchema Text ()
 getOracleValue oracle = do
   m <- findOracle oracle
   case m of
-    Just (_, ch) -> do
+    Just (oref, ch) -> do
       case _ciTxOutDatum ch of
         Left _ -> logError @String "BAD VALUE"
-        Right (Datum d) -> case PlutusTx.fromBuiltinData d of
-          Just (v :: Integer) -> logInfo @String $ "ORACLE FOUNDED. VALUE =  " ++ show v
+        Right dat@(Datum d) -> case PlutusTx.fromBuiltinData d of
+          Just (ov :: Integer) -> do
+            let v = (lovelaceValueOf $ oFee oracle) <> (_ciTxOutValue ch)
+                tx =
+                  (Constraints.mustPayToOtherScript (validatorHash $ oracleValidator oracle) dat v)
+                    <> (Constraints.mustSpendScriptOutput oref $ Redeemer $ PlutusTx.toBuiltinData Use)
+                lookups = Constraints.unspentOutputs (Map.singleton oref ch) <> Constraints.otherScript (oracleValidator oracle)
+            ledgerTx <- submitTxConstraintsWith @Oracling lookups tx
+            void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
+            logInfo @String $ "ORACLE FOUNDED. VALUE =  " ++ show ov
           Nothing -> logError @String "bad datum"
     _ -> logError @String "oracle not found"
 
-runOracle :: OracleParams -> Contract (Last Oracle) StartSchema Text ()
+startOracle :: (OracleParams, Integer) -> Contract w s Text Oracle
+startOracle (OracleParams {..}, val) = do
+  pkh <- Contract.ownPaymentPubKeyHash
+  osc <- mapError (pack . show) (mintContract pkh [(opTokenName, 1)] :: Contract w s CurrencyError OneShotCurrency)
+  let oracle =
+        Oracle
+          { oOwner = unPaymentPubKeyHash pkh,
+            oAssetClass = AssetClass (currencySymbol osc, opTokenName),
+            oFee = opFee
+          }
+  logInfo @String $ "ORACLE STARTED " ++ show oracle
+  let c = Constraints.mustPayToTheScript val (assetClassValue (oAssetClass oracle) 1 <> minLovelace)
+  ledgerTx <- submitTxConstraints (typedValidator oracle) c
+  awaitTxConfirmed $ getCardanoTxId ledgerTx
+  logInfo @String $ "ORACLE UPDATED " ++ show val
+  return oracle
+
+type StartSchema = Endpoint "starts" (OracleParams, Integer)
+
+startEndpoints :: Contract () StartSchema Text Oracle
+startEndpoints = awaitPromise start' >> startEndpoints
+  where
+    start' = endpoint @"starts" startOracle
+
+runOracle :: (OracleParams, Integer) -> Contract (Last Oracle) StartSchema Text ()
 runOracle op = do
   oracle <- startOracle op
   tell $ Last $ Just oracle

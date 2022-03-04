@@ -4,6 +4,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
@@ -30,7 +31,7 @@ import qualified Plutus.PAB.Webserver.Server as PAB.Server
 import Prettyprinter (Pretty (..), viaShow)
 import Wallet.Emulator.Wallet (knownWallet)
 
-data OracleContracts = StartO OracleParams | UpdateO (Oracle, Integer) | GetO Oracle
+data OracleContracts = StartO (OracleParams, Integer) | UpdateO (Oracle, Integer) | GetO Oracle
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, OpenApi.ToSchema)
 
@@ -68,7 +69,7 @@ main = void $
     let wallet1 = knownWallet 1
         wallet2 = knownWallet 2
         startParams =
-          OracleParams "ABC"
+          (OracleParams "ABC" 1_000_000, 456)
     cidInit <- Simulator.activateContract wallet1 $ StartO startParams
     oracle <- waitForLast cidInit
     Simulator.waitNSlots 2
