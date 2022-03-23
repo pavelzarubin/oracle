@@ -20,7 +20,7 @@ import Plutus.Trace
 import Test.Tasty
 
 testOracleParams :: (OracleParams, Integer)
-testOracleParams = (OracleParams (TokenName "ABC") 1_000_000, 123)
+testOracleParams = (OracleParams (TokenName "ABC") 3_000_000, 123)
 
 assertFailedTransactions :: TracePredicate
 assertFailedTransactions = Plutus.Contract.Test.not assertNoFailedTransactions
@@ -65,8 +65,8 @@ startUpdateGetTest =
   checkPredicateOptions
     (defaultCheckOptions & emulatorConfig .~ startUpdateGetConfig)
     "succesfull start, update, getting"
-    ( walletFundsChange (knownWallet 1) (lovelaceValueOf (-1_000_000))
-        .&&. walletFundsChange (knownWallet 2) (lovelaceValueOf (-1_000_000))
+    ( walletFundsChange (knownWallet 1) (lovelaceValueOf 1_000_000)
+        .&&. walletFundsChange (knownWallet 2) (lovelaceValueOf (-3_000_000))
         .&&. assertNoFailedTransactions
     )
     startUpdateGetTrace

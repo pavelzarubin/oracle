@@ -16,7 +16,7 @@ import Plutus.Trace
 
 simpleTrace :: EmulatorTrace ()
 simpleTrace = do
-  let op = OracleParams (TokenName "ABC") 1_000_000
+  let op = OracleParams (TokenName "ABC") 2_000_000
 
   h1 <- activateContractWallet (knownWallet 1) $ runOracle (op, 123)
   void $ waitNSlots 2
